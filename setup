@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o xtrace
+
+github_archive_url() {
+    local user="$1"
+    local repo="$2"
+    local release_tag="$3"
+    echo -n "https://github.com/${user}/${repo}/archive/${release_tag}.tar.gz"
+}
+
+nixpkgs_channel_url() {
+    local version="$1"
+    echo -n "https://nixos.org/channels/nixpkgs-${version}-darwin"
+}
+
+readonly NIX_VERSION="2.3.8"
+readonly NIX_HOST="releases.nixos.org"
+readonly NIX_INSTALLER_URL="https://${NIX_HOST}/nix/nix-${NIX_VERSION}/install"
+readonly NIX_INSTALLER_FLAGS=(
+    --darwin-use-unencrypted-nix-store-volume
+)
+readonly NIXPKGS_VERSION="20.09"
+readonly NIXPKGS_CHANNEL_URL="$( nixpkgs_channel_url "${NIXPKGS_VERSION}" )"
+readonly HOME_MANAGER_CHANNEL_URL="$( 
+    github_archive_url nix-community home-manager "release-${NIXPKGS_VERSION}" 
+)"
+readonly NIX_CONFIG_VERSION="17.11.2020"
+readonly NIX_CONFIG_URL="$(
+    github_archive_url mstream nix-config "release-${NIX_CONFIG_VERSION}"
+)"
+readonly NIX_CONFIG_DIRECTORY="${HOME}/.config/nixpkgs"
+
+if [[ -d "${NIX_CONFIG_DIRECTORY}" ]]; then
+    echo "${NIX_CONFIG_DIRECTORY} already exist" 1>&2
+    exit 1
+fi
+
+bash <(curl -L "${NIX_INSTALLER_URL}") "${NIX_INSTALLER_FLAGS[@]}"
+
+# shellcheck disable=SC1090
+source "${HOME}/.nix-profile/etc/profile.d/nix.sh"
+
+nix-channel --remove nixpkgs
+nix-channel --add "${NIXPKGS_CHANNEL_URL}" nixpkgs
+nix-channel --add "${HOME_MANAGER_CHANNEL_URL}" home-manager
+nix-channel --update
+
+nix-shell '<home-manager>' -A install
+
+curl -L "${NIX_CONFIG_URL}" \
+    | tar xz -C "${HOME}/.config/nixpkgs" --strip-components 1
+
+home-manager switch
+
